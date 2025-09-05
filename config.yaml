@@ -1,0 +1,73 @@
+exchange:
+  testnet: true
+  recv_window_ms: 5000
+  symbols: ["BTCUSDT"]
+  interval: "1m"
+  timezone: "UTC"
+  hedge_mode: false
+
+data:
+  start: "2021-01-01"
+  end: null
+  partitions: true
+  features:
+    lookback: 256
+    cols: ["close","high","low","volume","taker_buy_base","taker_buy_quote","funding",
+           "ema_12","ema_26","rsi","atr","logret","vol_norm","close_smooth"]
+costs:
+  taker_fee_bp: 4
+  slippage_bp: 1
+  funding_include: true
+
+filters:
+  winsorize:
+    lookback: 500
+    zmax: 8.0
+  smooth:
+    method: "ewma"
+    span: 5
+  tradable:
+    vol_lb: 60
+    k_mult: 2.5
+    vol_pctl: 0.1
+  mask_after_funding: false
+
+rl:
+  algo: "A2C"
+  action_space: [0,1,2,3]         # 0=hold,1=short,2=long,3=close
+  reward: "pnl_net"
+  gamma: 0.99
+  entropy_coef: 0.0005
+  value_coef: 0.5
+  lr: 0.0003
+  batch_steps: 2048
+  epochs: 5
+  grad_clip: 0.5
+  hold_penalty: 1e-5
+  close_bonus_beta: 0.2
+  require_close_before_flip: true
+
+train:
+  train_val_split: "walk_forward"
+  wf_train_days: 120
+  wf_test_days: 30
+  early_stopping_rounds: 5
+  seed: 42
+
+risk:
+  max_leverage: 5
+  risk_per_trade: 0.002
+  atr_window: 14
+  atr_mult_sl: 2.5
+  atr_mult_tp: 3.5
+  max_daily_loss: 0.03
+  max_drawdown_stop: 0.2
+  min_action_cooldown_bars: 2
+
+live:
+  bar_latency_sec: 2
+  reconnect_wait_sec: 5
+
+save:
+  checkpoint_every_epochs: 1
+  keep_last: 5
