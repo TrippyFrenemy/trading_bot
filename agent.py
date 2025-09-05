@@ -11,7 +11,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from utils import millify
 
-from model import DuelingQNetwork
+from model import DuelingQNetwork, TransformerDuelingQNetwork
 from replay_buffer import PrioritizedReplayBuffer
 
 logger = logging.getLogger(__name__)
@@ -44,23 +44,39 @@ class D3QN_PER_Agent:
         eps_frames: int,
         epsilon: float,
         max_gradient_norm: float,
+        model_arch: str = "cnn",
+        transformer_kwargs: Optional[dict] = None,
         backtest_cache_path: str = None,
     ) -> None:
         self.device = device
-        model_kwargs = {
-            "input_shape": state_shape,
-            "action_dim": action_dim,
-            "cnn_maps": cnn_maps,
-            "cnn_kernels": cnn_kernels,
-            "cnn_strides": cnn_strides,
-            "dense_val": dense_val,
-            "dense_adv": dense_adv,
-            "additional_feats": additional_feats,
-            "dropout_p": dropout_model,
-        }
-
-        self.policy_net = DuelingQNetwork(**model_kwargs).to(device)
-        self.target_net = DuelingQNetwork(**model_kwargs).to(device)
+        if model_arch == "transformer":
+            tkwargs = transformer_kwargs or {}
+            model_kwargs = {
+                "input_shape": state_shape,
+                "action_dim": action_dim,
+                "d_model": tkwargs.get("d_model", 256),
+                "nhead": tkwargs.get("nhead", 8),
+                "num_layers": tkwargs.get("num_layers", 4),
+                "dim_feedforward": tkwargs.get("dim_feedforward", 512),
+                "additional_feats": additional_feats,
+                "dropout_p": dropout_model,
+            }
+            self.policy_net = TransformerDuelingQNetwork(**model_kwargs).to(device)
+            self.target_net = TransformerDuelingQNetwork(**model_kwargs).to(device)
+        else:
+            model_kwargs = {
+                "input_shape": state_shape,
+                "action_dim": action_dim,
+                "cnn_maps": cnn_maps,
+                "cnn_kernels": cnn_kernels,
+                "cnn_strides": cnn_strides,
+                "dense_val": dense_val,
+                "dense_adv": dense_adv,
+                "additional_feats": additional_feats,
+                "dropout_p": dropout_model,
+            }
+            self.policy_net = DuelingQNetwork(**model_kwargs).to(device)
+            self.target_net = DuelingQNetwork(**model_kwargs).to(device)
 
         num_params = sum(p.numel() for p in self.policy_net.parameters())
         logger.info(f"Policy Net with {millify(num_params, precision=1)} parameters created in Agent")

@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, validator
 
 
 class DeviceConfig(BaseModel):
-    device: torch.device = Field(default_factory=lambda: torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+    device: torch.device = Field(default_factory=lambda: torch.device("cpu")) # torch.device("cuda" if torch.cuda.is_available() else "cpu"))
 
     class Config:
         arbitrary_types_allowed = True
@@ -128,6 +128,7 @@ class EpsilonConfig(BaseModel):
 
 
 class ModelConfig(BaseModel):
+    arch: Literal['cnn', 'transformer'] = 'cnn'
     cnn_maps: List[int] = [32, 64, 128] # [16, 32, 64]
     cnn_kernels: List[int] = [7, 5, 3]
     cnn_strides: List[int] = [2, 1, 1]
@@ -135,6 +136,10 @@ class ModelConfig(BaseModel):
     dense_adv: List[int] = [128, 64] # [64, 32]
     additional_feats: int = 4 + 5 * 4  # 4 + action_history_len * num_actions
     dropout_p: float = 0.1  # 0 ≤ p < 0.5; typical values are 0.1–0.2
+    transformer_d_model: int = 256
+    transformer_nhead: int = 8
+    transformer_layers: int = 4
+    transformer_ff: int = 512
 
 
 class TrainLogConfig(BaseModel):

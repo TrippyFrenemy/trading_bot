@@ -409,6 +409,13 @@ def main(cfg: MasterConfig = None):
         eps_end=cfg.eps.eps_end,
         eps_frames=cfg.eps.eps_decay_frames,
         epsilon=cfg.per.per_eps,
+        model_arch=cfg.model.arch,
+        transformer_kwargs=dict(
+            d_model=cfg.model.transformer_d_model,
+            nhead=cfg.model.transformer_nhead,
+            num_layers=cfg.model.transformer_layers,
+            dim_feedforward=cfg.model.transformer_ff,
+        ),
         max_gradient_norm=cfg.rl.max_gradient_norm,
         backtest_cache_path=None,
     )

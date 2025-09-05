@@ -107,7 +107,7 @@ python baseline_cnn_classifier.py configs/alpha_baseline_cnn.py
 # 5. Run Optuna config optimization
 python optimize_cfg.py configs/alpha.py --trials 100 --jobs 1
 
-# 6. Show and save top-10 trials for a given config
+# 6. Show and save top-10 trials for a gi9ven config
 python get_info_from_optuna.py configs/alpha.py --n-best-trials 10
 
 # 7. If your objective is minimized

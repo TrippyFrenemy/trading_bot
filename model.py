@@ -83,3 +83,63 @@ class DuelingQNetwork(nn.Module):
         advantage = self.advantage_stream(combined)
         q_value = value + (advantage - advantage.mean(dim=1, keepdim=True))
         return q_value
+
+
+class TransformerDuelingQNetwork(nn.Module):
+    """Transformer-based dueling network (~1M+ parameters)."""
+
+    def __init__(
+        self,
+        input_shape: Tuple[int, int, int],
+        action_dim: int,
+        d_model: int,
+        nhead: int,
+        num_layers: int,
+        dim_feedforward: int,
+        additional_feats: int,
+        dropout_p: float = 0.1,
+    ) -> None:
+        super().__init__()
+        self.input_shape = input_shape
+        self.action_dim = action_dim
+        channels, history_len, width = input_shape
+        self.linear_in = nn.Linear(channels * width, d_model)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout_p,
+            batch_first=True,
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        feat_size = history_len * d_model + additional_feats
+        self.value_stream = nn.Sequential(
+            nn.Linear(feat_size, dim_feedforward),
+            nn.ReLU(inplace=True),
+            nn.Linear(dim_feedforward, 1),
+        )
+        self.advantage_stream = nn.Sequential(
+            nn.Linear(feat_size, dim_feedforward),
+            nn.ReLU(inplace=True),
+            nn.Linear(dim_feedforward, action_dim),
+        )
+        logger.info(
+            f"Initialized TransformerDuelingQNetwork: input={input_shape}, actions={action_dim}"
+        )
+
+    def forward(self, state: Tensor) -> Tensor:
+        batch = state.size(0)
+        history_flat_size = torch.prod(torch.tensor(self.input_shape)).item()
+        history_part = state[:, :history_flat_size]
+        extra_part = state[:, history_flat_size:]
+        history_tensor = history_part.view(batch, *self.input_shape)
+        seq = history_tensor.view(batch, self.input_shape[1], -1)
+        seq = self.linear_in(seq)
+        features = self.transformer(seq)
+        features_flat = features.reshape(batch, -1)
+        combined = torch.cat([features_flat, extra_part], dim=1)
+        value = self.value_stream(combined)
+        advantage = self.advantage_stream(combined)
+        q_value = value + (advantage - advantage.mean(dim=1, keepdim=True))
+        return q_value
+    
