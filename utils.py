@@ -30,6 +30,8 @@ def set_random_seed(seed: int = 25) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+        # Enable benchmark mode for optimized cudnn algorithms when using GPU
+        torch.backends.cudnn.benchmark = True
     logger.info(f"Random seed set to {seed}")
 
 

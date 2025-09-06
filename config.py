@@ -7,7 +7,17 @@ from pydantic import BaseModel, Field, validator
 
 
 class DeviceConfig(BaseModel):
-    device: torch.device = Field(default_factory=lambda: torch.device("cpu")) # torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+    """Runtime device configuration.
+
+    Selects CUDA when available, otherwise defaults to CPU so that subsequent
+    model and tensor allocations are performed on the optimal device.
+    """
+
+    device: torch.device = Field(
+        default_factory=lambda: torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
+    )
 
     class Config:
         arbitrary_types_allowed = True
@@ -105,7 +115,7 @@ class MarketConfig(BaseModel):
 class RLConfig(BaseModel):
     gamma: float = 0.99
     learning_rate: float = 1e-4
-    batch_size: int = 16
+    batch_size: int = 64
     target_update_freq: int = 100
     train_start: int = 1000
     max_gradient_norm: float = 1.0

@@ -1,9 +1,10 @@
 # replay_buffer.py
 import logging
 import random
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,13 @@ class PrioritizedReplayBuffer:
         else:
             return self._retrieve(right, sum_priorities - self.tree[left])
 
-    def sample(self, batch_size: int) -> Tuple[np.ndarray, ...]:
+    def sample(self, batch_size: int,  device: Optional[torch.device] = None) -> Tuple["np.ndarray | torch.Tensor", ...]:
+        """Sample a batch of experiences.
+
+        If a ``device`` is provided, the returned arrays are converted to
+        ``torch.Tensor`` objects located on that device, which saves repeated
+        host->device transfers in the training loop.
+        """
         assert self.size >= batch_size, "Not enough samples in buffer"
 
         total_p = self.tree[0]
@@ -112,14 +119,30 @@ class PrioritizedReplayBuffer:
             weights.append(w / max_weight)
             indices.append(node_idx)
 
+        states_arr = np.array(states, dtype=np.float32)
+        actions_arr = np.array(actions, dtype=np.int64)
+        rewards_arr = np.array(rewards, dtype=np.float32)
+        next_states_arr = np.array(next_states, dtype=np.float32)
+        dones_arr = np.array(dones, dtype=bool)
+        indices_arr = np.array(indices, dtype=np.int64)
+        weights_arr = np.array(weights, dtype=np.float32)
+
+        if device is not None:
+            states_arr = torch.from_numpy(states_arr).to(device)
+            actions_arr = torch.from_numpy(actions_arr).to(device)
+            rewards_arr = torch.from_numpy(rewards_arr).to(device)
+            next_states_arr = torch.from_numpy(next_states_arr).to(device)
+            dones_arr = torch.from_numpy(dones_arr).to(device)
+            weights_arr = torch.from_numpy(weights_arr).to(device)
+
         return (
-            np.array(states, dtype=np.float32),
-            np.array(actions, dtype=np.int64),
-            np.array(rewards, dtype=np.float32),
-            np.array(next_states, dtype=np.float32),
-            np.array(dones, dtype=bool),
-            np.array(indices, dtype=np.int64),
-            np.array(weights, dtype=np.float32),
+            states_arr,
+            actions_arr,
+            rewards_arr,
+            next_states_arr,
+            dones_arr,
+            indices_arr,
+            weights_arr,
         )
 
     def update_priorities(self, indices: np.ndarray, td_errors: np.ndarray) -> None:

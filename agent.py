@@ -86,6 +86,7 @@ class D3QN_PER_Agent:
         self.target_net.eval()
 
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=learning_rate)
+        self.scaler = torch.amp.GradScaler('cuda', enabled=device.type == "cuda")
 
         self.replay_buffer = PrioritizedReplayBuffer(
             capacity=buffer_size,
@@ -197,31 +198,39 @@ class D3QN_PER_Agent:
         if len(self.replay_buffer) < self.train_start:
             return None
 
-        (states, actions, rewards, next_states, dones, indices, weights) = self.replay_buffer.sample(self.batch_size)
+        (states_t, actions_t, rewards_t, next_states_t, dones_t, indices, weights_t) = self.replay_buffer.sample(self.batch_size, device=self.device)
 
-        states_t = torch.from_numpy(states).float().to(self.device)
-        actions_t = torch.from_numpy(actions).long().to(self.device)
-        rewards_t = torch.from_numpy(rewards).float().to(self.device)
-        next_states_t = torch.from_numpy(next_states).float().to(self.device)
-        dones_t = torch.from_numpy(dones).bool().to(self.device)
-        weights_t = torch.from_numpy(weights).float().to(self.device)
+        with torch.amp.autocast('cuda', enabled=self.device.type == "cuda"):
+            next_actions = self.policy_net(next_states_t).argmax(dim=1)
+            next_q_values = (
+                self.target_net(next_states_t)
+                .gather(1, next_actions.unsqueeze(1))
+                .squeeze(1)
+            )
+            next_q_values = next_q_values.masked_fill(dones_t.bool(), 0.0)
+            target_q_values = rewards_t + self.gamma * next_q_values
 
-        next_actions = self.policy_net(next_states_t).argmax(dim=1)
-        next_q_values = self.target_net(next_states_t).gather(1, next_actions.unsqueeze(1)).squeeze(1)
-        next_q_values[dones_t] = 0.0
-        target_q_values = rewards_t + self.gamma * next_q_values
+            current_q_values = (
+                self.policy_net(states_t).gather(1, actions_t.unsqueeze(1)).squeeze(1)
+            )
+            loss = F.smooth_l1_loss(
+                current_q_values, target_q_values, reduction="none"
+            )
+            weighted_loss = (weights_t * loss).mean()
 
-        current_q_values = self.policy_net(states_t).gather(1, actions_t.unsqueeze(1)).squeeze(1)
-        td_errors = (target_q_values - current_q_values).abs().detach().cpu().numpy()
+        td_errors = (
+            target_q_values.detach() - current_q_values.detach()
+        ).abs().cpu().numpy()
         self.replay_buffer.update_priorities(indices, td_errors)
 
-        loss = F.smooth_l1_loss(current_q_values, target_q_values, reduction="none")
-        weighted_loss = (weights_t * loss).mean()
-
         self.optimizer.zero_grad()
-        weighted_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), self.max_gradient_norm)
-        self.optimizer.step()
+        self.scaler.scale(weighted_loss).backward()
+        self.scaler.unscale_(self.optimizer)
+        torch.nn.utils.clip_grad_norm_(
+            self.policy_net.parameters(), self.max_gradient_norm
+        )
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
 
         self.learn_steps += 1
         if self.learn_steps % self.target_update_freq == 0:

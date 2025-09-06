@@ -99,6 +99,7 @@ def train_model(
     criterion = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.rl.learning_rate)
     model.to(cfg.device.device)
+    scaler = torch.amp.GradScaler('cuda', enabled=cfg.device.device.type == "cuda")
 
     best_model_state = None
     best_val_pnl = float("-inf")
@@ -116,16 +117,20 @@ def train_model(
             train_iter = iter(train_loader)
             x_batch, y_batch = next(train_iter)
 
-        x_batch, y_batch = x_batch.to(cfg.device.device), y_batch.float().to(cfg.device.device)
-        preds = model(x_batch)
-        loss = criterion(preds, y_batch)
+        x_batch = x_batch.to(cfg.device.device, non_blocking=True)
+        y_batch = y_batch.float().to(cfg.device.device, non_blocking=True)
+        with torch.amp.autocast('cuda', enabled=cfg.device.device.type == "cuda"):
+            preds = model(x_batch)
+            loss = criterion(preds, y_batch)
 
         optimizer.zero_grad()
-        loss.backward()
+        scaler.scale(loss).backward()
         if cfg.rl.max_gradient_norm is not None:
+            scaler.unscale_(optimizer)
             clip_grad_norm_(model.parameters(), cfg.rl.max_gradient_norm)
 
-        optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
 
         smooth_loss = (smooth_loss or loss.item()) * 0.9 + loss.item() * 0.1
         counter.desc = f"Training loss={smooth_loss:.7f}"
@@ -137,7 +142,7 @@ def train_model(
             val_targets = []
             with torch.no_grad():
                 for x_val, y_val in val_loader:
-                    x_val = x_val.to(cfg.device.device)
+                    x_val = x_val.to(cfg.device.device, non_blocking=True)
                     pred = model(x_val).cpu().numpy()
                     val_preds.extend((pred > 0.5).astype(int))
                     val_prob_preds.extend(pred)
@@ -258,11 +263,31 @@ def run_baseline_cnn(cfg: MasterConfig):
     train_ds = PriceDataset(train_seqs, raw_train, cfg)
     val_ds = PriceDataset(val_seqs, raw_val, cfg)
     test_ds = PriceDataset(test_seqs, raw_test, cfg)
-
-    train_loader = DataLoader(train_ds, batch_size=cfg.rl.batch_size, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=cfg.rl.batch_size, shuffle=False)
-    test_loader = DataLoader(test_ds, batch_size=cfg.rl.batch_size, shuffle=False)
-
+    
+    cpu_count = os.cpu_count() or 1
+    num_workers = max(1, cpu_count - 1)
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=cfg.rl.batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=cfg.rl.batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+    test_loader = DataLoader(
+        test_ds,
+        batch_size=cfg.rl.batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+    
     input_shape = (cfg.seq.num_features, cfg.seq.input_history_len, 1)
     model = CNNBinaryClassifier(
         input_shape=input_shape,
@@ -281,7 +306,7 @@ def run_baseline_cnn(cfg: MasterConfig):
     test_targets = []
     with torch.no_grad():
         for x_test, y_test in test_loader:
-            x_test = x_test.to(cfg.device.device)
+            x_test = x_test.to(cfg.device.device, non_blocking=True)
             pred = model(x_test).cpu().numpy()
             all_preds.extend((pred > 0.5).astype(int))
             test_prob_preds.extend(pred)
